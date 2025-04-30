@@ -1,148 +1,201 @@
+#changed
 import numpy as np
 from tqdm import tqdm
+from dataclasses import dataclass
+from typing import List, Tuple, Dict, Optional
 from sklearn.metrics import silhouette_score, davies_bouldin_score, calinski_harabasz_score
 
-def calculate_fitness(X, centroids):
-    """Calculate the sum of squared distances from each point to its nearest centroid"""
-    distances = np.sqrt(((X[:, np.newaxis] - centroids)**2).sum(axis=2))
-    return np.sum(np.min(distances, axis=1))
+@dataclass
+class GAParameters:
+    population_size: int = 50
+    n_generations: int = 100
+    mutation_rate: float = 0.1
+    tournament_size: int = 2
+    elite_size: int = 2
+    crossover_rate: float = 0.8
+    verbose: bool = True
 
-def assign_clusters(X, centroids):
-    """Assign each data point to the nearest centroid"""
-    distances = np.sqrt(((X[:, np.newaxis] - centroids)**2).sum(axis=2))
-    return np.argmin(distances, axis=1)
-
-def ga_clustering(X, n_clusters, population_size=50, n_generations=100, mutation_rate=0.1, verbose=True):
-    """
-    Perform clustering using Genetic Algorithm
-    
-    Parameters:
-    -----------
-    X : array-like, shape (n_samples, n_features)
-        The input data
-    n_clusters : int
-        Number of clusters to find
-    population_size : int, optional (default=50)
-        Size of the population
-    n_generations : int, optional (default=100)
-        Number of generations
-    mutation_rate : float, optional (default=0.1)
-        Probability of mutation
-    verbose : bool, optional (default=True)
-        Whether to show progress bar
+class GeneticAlgorithmClustering:
+    def __init__(self, params: GAParameters = None):
+        self.params = params or GAParameters()
+        self.best_solution = None
+        self.best_fitness = float('inf')
+        self.fitness_history = []
         
-    Returns:
-    --------
-    centroids : array, shape (n_clusters, n_features)
-        The final centroids
-    labels : array, shape (n_samples,)
-        The cluster labels for each point
-    """
-    # Data dimensions
-    n_samples, n_features = X.shape
-    X_min = np.min(X, axis=0)
-    X_max = np.max(X, axis=0)
+    def calculate_fitness(self, X: np.ndarray, centroids: np.ndarray) -> float:
+        """Calculate fitness using sum of squared distances"""
+        distances = np.sqrt(((X[:, np.newaxis] - centroids)**2).sum(axis=2))
+        return np.sum(np.min(distances, axis=1))
     
-    # Initialize population
-    population = []
-    for _ in range(population_size):
-        centroids = np.array([np.random.uniform(X_min, X_max) for _ in range(n_clusters)])
-        population.append(centroids)
+    def assign_clusters(self, X: np.ndarray, centroids: np.ndarray) -> np.ndarray:
+        """Assign each point to nearest centroid"""
+        distances = np.sqrt(((X[:, np.newaxis] - centroids)**2).sum(axis=2))
+        return np.argmin(distances, axis=1)
     
-    # Evolution loop
-    iterator = range(n_generations)
-    if verbose:
-        iterator = tqdm(iterator, desc="GA Progress")
-    
-    for _ in iterator:
-        # Calculate fitness
-        fitness = [calculate_fitness(X, individual) for individual in population]
+    def initialize_population(self, X: np.ndarray, n_clusters: int) -> List[np.ndarray]:
+        """Initialize population with random centroids"""
+        X_min = np.min(X, axis=0)
+        X_max = np.max(X, axis=0)
+        population = []
         
-        # Selection (tournament selection)
-        new_population = []
-        for _ in range(population_size):
-            # Select two random individuals
-            idx1, idx2 = np.random.choice(population_size, 2, replace=False)
-            if fitness[idx1] < fitness[idx2]:
-                new_population.append(population[idx1].copy())
-            else:
-                new_population.append(population[idx2].copy())
+        for _ in range(self.params.population_size):
+            centroids = np.array([
+                np.random.uniform(X_min, X_max) 
+                for _ in range(n_clusters)
+            ])
+            population.append(centroids)
+        return population
+    
+    def tournament_selection(self, population: List[np.ndarray], 
+                        fitness_values: List[float]) -> np.ndarray:
+        """Select individual using tournament selection"""
+        tournament_idx = np.random.choice(
+            len(population), 
+            self.params.tournament_size, 
+            replace=False
+        )
+        tournament_fitness = [fitness_values[idx] for idx in tournament_idx]
+        winner_idx = tournament_idx[np.argmin(tournament_fitness)]
+        return population[winner_idx].copy()
+    
+    def crossover(self, parent1: np.ndarray, parent2: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
+        """Perform single-point crossover"""
+        if np.random.random() < self.params.crossover_rate:
+            crossover_point = np.random.randint(1, len(parent1))
+            child1 = np.vstack((parent1[:crossover_point], parent2[crossover_point:]))
+            child2 = np.vstack((parent2[:crossover_point], parent1[crossover_point:]))
+            return child1, child2
+        return parent1.copy(), parent2.copy()
+    
+    def mutate(self, individual: np.ndarray, X_min: np.ndarray, 
+                X_max: np.ndarray) -> np.ndarray:
+        """Perform mutation on an individual"""
+        if np.random.random() < self.params.mutation_rate:
+            centroid_idx = np.random.randint(len(individual))
+            feature_idx = np.random.randint(individual.shape[1])
+            individual[centroid_idx, feature_idx] = np.random.uniform(
+                X_min[feature_idx], 
+                X_max[feature_idx]
+            )
+        return individual
+    
+    def fit(self, X: np.ndarray, n_clusters: int) -> Tuple[np.ndarray, np.ndarray]:
+        """Main clustering method"""
+        # Initialize
+        population = self.initialize_population(X, n_clusters)
+        X_min, X_max = np.min(X, axis=0), np.max(X, axis=0)
         
-        # Crossover
-        for i in range(0, population_size, 2):
-            if i + 1 < population_size:
-                parent1 = new_population[i]
-                parent2 = new_population[i + 1]
+        # Evolution loop
+        iterator = range(self.params.n_generations)
+        if self.params.verbose:
+            iterator = tqdm(iterator, desc="GA Progress")
+            
+        for _ in iterator:
+            # Calculate fitness for all individuals
+            fitness_values = [self.calculate_fitness(X, ind) for ind in population]
+            
+            # Store best solution
+            min_fitness_idx = np.argmin(fitness_values)
+            if fitness_values[min_fitness_idx] < self.best_fitness:
+                self.best_fitness = fitness_values[min_fitness_idx]
+                self.best_solution = population[min_fitness_idx].copy()
+            
+            self.fitness_history.append(self.best_fitness)
+            
+            # Create new population
+            new_population = []
+            
+            # Elitism
+            elite_indices = np.argsort(fitness_values)[:self.params.elite_size]
+            new_population.extend([population[idx].copy() for idx in elite_indices])
+            
+            # Fill rest of population
+            while len(new_population) < self.params.population_size:
+                parent1 = self.tournament_selection(population, fitness_values)
+                parent2 = self.tournament_selection(population, fitness_values)
+                child1, child2 = self.crossover(parent1, parent2)
                 
-                # Single-point crossover
-                crossover_point = np.random.randint(1, n_clusters)
-                child1 = np.vstack((parent1[:crossover_point], parent2[crossover_point:]))
-                child2 = np.vstack((parent2[:crossover_point], parent1[crossover_point:]))
+                # Mutate children
+                child1 = self.mutate(child1, X_min, X_max)
+                child2 = self.mutate(child2, X_min, X_max)
                 
-                new_population[i] = child1
-                new_population[i + 1] = child2
+                new_population.append(child1)
+                if len(new_population) < self.params.population_size:
+                    new_population.append(child2)
+            
+            population = new_population
         
-        # Mutation
-        for i in range(population_size):
-            if np.random.random() < mutation_rate:
-                # Select a random centroid
-                centroid_idx = np.random.randint(n_clusters)
-                # Mutate a random feature
-                feature_idx = np.random.randint(n_features)
-                new_population[i][centroid_idx, feature_idx] = np.random.uniform(
-                    X_min[feature_idx], X_max[feature_idx]
-                )
-        
-        population = new_population
-    
-    # Find best solution
-    fitness = [calculate_fitness(X, individual) for individual in population]
-    best_idx = np.argmin(fitness)
-    best_centroids = population[best_idx]
-    
-    # Final assignment
-    final_labels = assign_clusters(X, best_centroids)
-    
-    return best_centroids, final_labels
+        # Get final labels
+        final_labels = self.assign_clusters(X, self.best_solution)
+        return self.best_solution, final_labels
 
-def run_ga_clustering(X, n_clusters, scaler=None, feature_names=None):
-    """
-    Run GA clustering and return results
+def run_ga_clustering(X: np.ndarray, n_clusters: int) -> Tuple[List[Dict], List[np.ndarray]]:
+    """Run GA clustering with 4 different parameter settings and return their results"""
     
-    Parameters:
-    -----------
-    X : array-like, shape (n_samples, n_features)
-        The input data
-    n_clusters : int
-        Number of clusters to find
-    scaler : object, optional
-        Scaler used to transform the data
-    feature_names : list, optional
-        Names of the features
-        
-    Returns:
-    --------
-    results : dict
-        Dictionary containing clustering results and metrics
-    labels : array, shape (n_samples,)
-        Cluster labels for each point
-    """
-    print("\nRunning Genetic Algorithm (GA) for clustering...")
-    ga_centroids, ga_labels = ga_clustering(X, n_clusters)
-    
-    # Ensure labels are 1D array
-    ga_labels = np.ravel(ga_labels)
-    
-    # Evaluate clustering performance
-    results = {
-        'method': 'GA',
-        'centroids': ga_centroids,
-        'metrics': {
-            'silhouette': silhouette_score(X, ga_labels),
-            'db_index': davies_bouldin_score(X, ga_labels),
-            'ch_score': calinski_harabasz_score(X, ga_labels)
-        }
+    # Define 4 different parameter settings
+    parameter_versions = {
+        'version_1': GAParameters(
+            population_size=30,
+            n_generations=50,
+            mutation_rate=0.15,
+            tournament_size=2,
+            elite_size=1,
+            crossover_rate=0.9,
+            verbose=True
+        ),
+        'version_2': GAParameters(
+            population_size=50,
+            n_generations=100,
+            mutation_rate=0.1,
+            tournament_size=3,
+            elite_size=2,
+            crossover_rate=0.8,
+            verbose=True
+        ),
+        'version_3': GAParameters(
+            population_size=100,
+            n_generations=200,
+            mutation_rate=0.05,
+            tournament_size=4,
+            elite_size=3,
+            crossover_rate=0.7,
+            verbose=True
+        ),
+        'version_4': GAParameters(
+            population_size=80,
+            n_generations=150,
+            mutation_rate=0.08,
+            tournament_size=3,
+            elite_size=2,
+            crossover_rate=0.75,
+            verbose=True
+        )
     }
     
-    return results, ga_labels
+    all_results = []
+    all_labels = []
+    
+    # Run GA with each parameter version
+    for version_name, params in parameter_versions.items():
+        # Initialize and run GA
+        ga = GeneticAlgorithmClustering(params)
+        centroids, labels = ga.fit(X, n_clusters)
+        
+        # Calculate metrics
+        results = {
+            'method': f'GA_{version_name}',
+            'centroids': centroids,
+            'fitness_history': ga.fitness_history,
+            'parameters': params,
+            'metrics': {
+                'silhouette': silhouette_score(X, labels),
+                'db_index': davies_bouldin_score(X, labels),
+                'ch_score': calinski_harabasz_score(X, labels)
+            }
+        }
+        
+        all_results.append(results)
+        all_labels.append(labels)
+    
+    return all_results, all_labels
 

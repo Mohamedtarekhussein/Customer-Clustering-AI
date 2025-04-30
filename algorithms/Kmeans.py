@@ -1,3 +1,4 @@
+# change
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
@@ -5,105 +6,132 @@ from sklearn.preprocessing import StandardScaler
 from sklearn.cluster import KMeans
 from sklearn.metrics import silhouette_score, davies_bouldin_score, calinski_harabasz_score
 from sklearn.decomposition import PCA
+from dataclasses import dataclass
+from typing import Dict, List, Tuple
 
-def find_optimal_k(X_scaled, k_min=2, k_max=10):
-    """
-    Use Elbow method and Silhouette scores to find optimal number of clusters.
-    """
-    inertia = []
-    silhouette_scores = []
-    k_range = range(k_min, k_max + 1)
+@dataclass
+class KMeansParameters:
+    n_clusters: int
+    n_init: int = 10
+    max_iter: int = 300
+    init: str = 'k-means++'
+    random_state: int = 42
+    algorithm: str = 'lloyd'
 
-    for k in k_range:
-        kmeans = KMeans(n_clusters=k, random_state=42, n_init=10)
-        kmeans.fit(X_scaled)
-        inertia.append(kmeans.inertia_)
-        silhouette_scores.append(silhouette_score(X_scaled, kmeans.labels_))
+def run_kmeans_single(X: np.ndarray, params: KMeansParameters) -> Dict:
+    """Run KMeans with specific parameters"""
+    kmeans = KMeans(
+        n_clusters=params.n_clusters,
+        n_init=params.n_init,
+        max_iter=params.max_iter,
+        init=params.init,
+        random_state=params.random_state,
+        algorithm=params.algorithm
+    )
+    labels = kmeans.fit_predict(X)
+    
+    metrics = {
+        'silhouette': silhouette_score(X, labels),
+        'davies_bouldin': davies_bouldin_score(X, labels),
+        'calinski_harabasz': calinski_harabasz_score(X, labels),
+        'inertia': kmeans.inertia_
+    }
+    
+    return {
+        'labels': labels,
+        'centroids': kmeans.cluster_centers_,
+        'metrics': metrics,
+        'n_iterations': kmeans.n_iter_
+    }
 
-    plt.figure(figsize=(12, 5))
+def run_kmeans_clustering(X: np.ndarray, n_clusters: int) -> Tuple[List[Dict], List[np.ndarray]]:
+    """Run KMeans with 4 different parameter settings"""
+    
+    parameter_versions = {
+        'quick': KMeansParameters(
+            n_clusters=n_clusters,
+            n_init=5,
+            max_iter=200,
+            init='random',
+            algorithm='lloyd'
+        ),
+        'balanced': KMeansParameters(
+            n_clusters=n_clusters,
+            n_init=10,
+            max_iter=300,
+            init='k-means++',
+            algorithm='lloyd'
+        ),
+        'thorough': KMeansParameters(
+            n_clusters=n_clusters,
+            n_init=20,
+            max_iter=500,
+            init='k-means++',
+            algorithm='full'
+        ),
+        'elkan': KMeansParameters(
+            n_clusters=n_clusters,
+            n_init=15,
+            max_iter=400,
+            init='k-means++',
+            algorithm='elkan'
+        )
+    }
+    
+    all_results = []
+    all_labels = []
+    
+    for version_name, params in parameter_versions.items():
+        result = run_kmeans_single(X, params)
+        
+        results = {
+            'method': f'KMeans_{version_name}',
+            'parameters': params,
+            'centroids': result['centroids'],
+            'metrics': result['metrics'],
+            'n_iterations': result['n_iterations']
+        }
+        
+        all_results.append(results)
+        all_labels.append(result['labels'])
+    
+    return all_results, all_labels
 
-    plt.subplot(1, 2, 1)
-    plt.plot(k_range, inertia, marker='o')
-    plt.xlabel('Number of Clusters')
-    plt.ylabel('Inertia')
-    plt.title('Elbow Method for Optimal k')
-
-    plt.subplot(1, 2, 2)
-    plt.plot(k_range, silhouette_scores, marker='o')
-    plt.xlabel('Number of Clusters')
-    plt.ylabel('Silhouette Score')
-    plt.title('Silhouette Score for Optimal k')
-
+def plot_kmeans_comparison(X: np.ndarray, results: List[Dict], labels: List[np.ndarray]):
+    """Plot clustering results for all versions"""
+    pca = PCA(n_components=2)
+    X_pca = pca.fit_transform(X)
+    
+    plt.figure(figsize=(20, 5))
+    for idx, (result, cluster_labels) in enumerate(zip(results, labels)):
+        plt.subplot(1, 4, idx + 1)
+        
+        unique_labels = np.unique(cluster_labels)
+        for label in unique_labels:
+            mask = cluster_labels == label
+            plt.scatter(X_pca[mask, 0], X_pca[mask, 1], label=f'Cluster {label}', alpha=0.6)
+            
+        centroids_pca = pca.transform(result['centroids'])
+        plt.scatter(centroids_pca[:, 0], centroids_pca[:, 1], 
+                c='red', marker='x', s=200, linewidth=3, label='Centroids')
+        
+        plt.title(f"{result['method']}\nSilhouette: {result['metrics']['silhouette']:.3f}")
+        if idx == 0:
+            plt.legend()
+            
     plt.tight_layout()
     plt.show()
-    plt.close()
 
-
-def apply_kmeans(X_scaled, optimal_k=6):
-    """
-    Apply K-means clustering.
-    """
-    kmeans = KMeans(n_clusters=optimal_k, random_state=42, n_init=10)
-    kmeans_labels = kmeans.fit_predict(X_scaled)
-    kmeans_centroids = kmeans.cluster_centers_
-    return kmeans_labels, kmeans_centroids
-
-
-def evaluate_kmeans(X_scaled, kmeans_labels):
-    """
-    Evaluate K-means clustering performance.
-    """
-    silhouette = silhouette_score(X_scaled, kmeans_labels)
-    db_index = davies_bouldin_score(X_scaled, kmeans_labels)
-    ch_score = calinski_harabasz_score(X_scaled, kmeans_labels)
-
-    print("\nK-means Clustering Evaluation:")
-    print(f"Silhouette Score: {silhouette:.4f}")
-    print(f"Davies-Bouldin Index: {db_index:.4f}")
-    print(f"Calinski-Harabasz Index: {ch_score:.4f}")
-
-    return silhouette, db_index, ch_score
-
-
-def plot_pca_clusters(X_scaled, kmeans_labels, kmeans_centroids, optimal_k=6):
-    """
-    Plot the K-means clustering result after applying PCA.
-    """
-    pca = PCA(n_components=2)
-    X_pca = pca.fit_transform(X_scaled)
-
-    plt.figure(figsize=(10, 8))
-    for i in range(optimal_k):
-        plt.scatter(X_pca[kmeans_labels == i, 0], X_pca[kmeans_labels == i, 1], label=f'Cluster {i+1}')
-
-    centroids_pca = pca.transform(kmeans_centroids)
-    plt.scatter(centroids_pca[:, 0], centroids_pca[:, 1], s=100, c='black', marker='X', label='Centroids')
-
-    plt.title('K-means Clustering Results (PCA)')
-    plt.xlabel('Principal Component 1')
-    plt.ylabel('Principal Component 2')
-    plt.legend()
-    plt.show()
-    plt.close()
-
-
-def plot_original_features(df, kmeans_centroids, scaler):
-    """
-    Plot clustering result using original features like Annual Income and Spending Score.
-    """
-    optimal_k = len(np.unique(df['KMeans_Cluster']))
-
-    plt.figure(figsize=(10, 8))
-    for i in range(optimal_k):
-        cluster_data = df[df['KMeans_Cluster'] == i]
-        plt.scatter(cluster_data['Annual Income (k$)'], cluster_data['Spending Score (1-100)'], label=f'Cluster {i+1}')
-
-    centroids_original = scaler.inverse_transform(kmeans_centroids)
-    plt.scatter(centroids_original[:, 1], centroids_original[:, 2], s=100, c='black', marker='X', label='Centroids')
-
-    plt.title('K-means Clustering Results (Income vs Spending)')
-    plt.xlabel('Annual Income (k$)')
-    plt.ylabel('Spending Score (1-100)')
-    plt.legend()
-    plt.show()
-    plt.close()
+def print_comparison_results(results: List[Dict]):
+    """Print comparison metrics for all versions"""
+    print("\nKMeans Versions Comparison:")
+    print("-" * 60)
+    print(f"{'Version':<15} {'Silhouette':<12} {'DB Index':<12} {'CH Score':<12} {'Iterations':<10}")
+    print("-" * 60)
+    
+    for result in results:
+        print(f"{result['method']:<15} "
+            f"{result['metrics']['silhouette']:<12.3f} "
+            f"{result['metrics']['davies_bouldin']:<12.3f} "
+            f"{result['metrics']['calinski_harabasz']:<12.0f} "
+            f"{result['n_iterations']:<10}")

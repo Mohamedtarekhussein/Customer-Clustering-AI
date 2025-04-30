@@ -1,38 +1,94 @@
-# algorithms/DBSCAN/dbscan_clustering.py
-
+#changed
 from sklearn.cluster import DBSCAN
 from sklearn.metrics import silhouette_score, davies_bouldin_score, calinski_harabasz_score
 import numpy as np
+from dataclasses import dataclass
+from typing import Dict, List, Tuple, Optional
 
-def run_dbscan_clustering(X_scaled, df):
-    dbscan = DBSCAN(eps=0.5, min_samples=5)
-    dbscan_labels = dbscan.fit_predict(X_scaled)
+@dataclass
+class DBSCANParameters:
+    eps: float
+    min_samples: int
+    metric: str = 'euclidean'
+    algorithm: str = 'auto'
+    leaf_size: int = 30
+    n_jobs: int = -1
 
-    n_clusters_dbscan = len(set(dbscan_labels)) - (1 if -1 in dbscan_labels else 0)
-
-    df['DBSCAN_Cluster'] = dbscan_labels
-
-    mask = dbscan_labels != -1
-
-    if len(set(dbscan_labels[mask])) > 1:
-        silhouette = silhouette_score(X_scaled[mask], dbscan_labels[mask])
-        db_score = davies_bouldin_score(X_scaled[mask], dbscan_labels[mask])
-        ch_score = calinski_harabasz_score(X_scaled[mask], dbscan_labels[mask])
-
-        return {
-            'labels': dbscan_labels,
-            'centroids': np.zeros((n_clusters_dbscan, X_scaled.shape[1])),
-            'metrics': {
-                'silhouette': silhouette,
-                'davies_bouldin': db_score,
-                'calinski_harabasz': ch_score
-            }
+def run_dbscan_single(X: np.ndarray, params: DBSCANParameters) -> Dict:
+    """Run DBSCAN with specific parameters"""
+    dbscan = DBSCAN(
+        eps=params.eps,
+        min_samples=params.min_samples,
+        metric=params.metric,
+        algorithm=params.algorithm,
+        leaf_size=params.leaf_size,
+        n_jobs=params.n_jobs
+    )
+    labels = dbscan.fit_predict(X)
+    
+    n_clusters = len(set(labels)) - (1 if -1 in labels else 0)
+    mask = labels != -1
+    
+    if len(set(labels[mask])) > 1:
+        metrics = {
+            'silhouette': silhouette_score(X[mask], labels[mask]),
+            'davies_bouldin': davies_bouldin_score(X[mask], labels[mask]),
+            'calinski_harabasz': calinski_harabasz_score(X[mask], labels[mask])
         }
     else:
-        return {
-            'labels': dbscan_labels,
-            'centroids': None,
-            'metrics': {
-                'error': 'DBSCAN found only one cluster or noise.'
-            }
+        metrics = {'error': 'DBSCAN found only one cluster or noise.'}
+    
+    return {
+        'labels': labels,
+        'n_clusters': n_clusters,
+        'metrics': metrics
+    }
+
+def run_dbscan_clustering(X: np.ndarray) -> Tuple[List[Dict], List[np.ndarray]]:
+    """Run DBSCAN with 4 different parameter settings"""
+    
+    # Define 4 parameter versions
+    parameter_versions = {
+        'conservative': DBSCANParameters(
+            eps=0.5,
+            min_samples=5,
+            metric='euclidean',
+            algorithm='auto'
+        ),
+        'aggressive': DBSCANParameters(
+            eps=0.3,
+            min_samples=3,
+            metric='euclidean',
+            algorithm='auto'
+        ),
+        'balanced': DBSCANParameters(
+            eps=0.4,
+            min_samples=4,
+            metric='euclidean',
+            algorithm='auto'
+        ),
+        'dense': DBSCANParameters(
+            eps=0.2,
+            min_samples=6,
+            metric='euclidean',
+            algorithm='auto'
+        )
+    }
+    
+    all_results = []
+    all_labels = []
+    
+    for version_name, params in parameter_versions.items():
+        result = run_dbscan_single(X, params)
+        
+        results = {
+            'method': f'DBSCAN_{version_name}',
+            'parameters': params,
+            'n_clusters': result['n_clusters'],
+            'metrics': result['metrics']
         }
+        
+        all_results.append(results)
+        all_labels.append(result['labels'])
+    
+    return all_results, all_labels
