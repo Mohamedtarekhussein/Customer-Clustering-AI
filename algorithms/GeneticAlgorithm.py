@@ -1,4 +1,3 @@
-#changed
 import numpy as np
 from tqdm import tqdm
 from dataclasses import dataclass
@@ -134,41 +133,41 @@ def run_ga_clustering(X: np.ndarray, n_clusters: int) -> Tuple[List[Dict], List[
     
     # Define 4 different parameter settings
     parameter_versions = {
-        'version_1': GAParameters(
+        'Small_Pop_Fast': GAParameters(
             population_size=30,
             n_generations=50,
             mutation_rate=0.15,
             tournament_size=2,
             elite_size=1,
             crossover_rate=0.9,
-            verbose=True
+            verbose=False
         ),
-        'version_2': GAParameters(
+        'Balanced': GAParameters(
             population_size=50,
             n_generations=100,
             mutation_rate=0.1,
             tournament_size=3,
             elite_size=2,
             crossover_rate=0.8,
-            verbose=True
+            verbose=False
         ),
-        'version_3': GAParameters(
+        'Large_Pop_Long': GAParameters(
             population_size=100,
             n_generations=200,
             mutation_rate=0.05,
             tournament_size=4,
             elite_size=3,
             crossover_rate=0.7,
-            verbose=True
+            verbose=False
         ),
-        'version_4': GAParameters(
+        'Custom': GAParameters(
             population_size=80,
             n_generations=150,
             mutation_rate=0.08,
             tournament_size=3,
             elite_size=2,
             crossover_rate=0.75,
-            verbose=True
+            verbose=False
         )
     }
     
@@ -186,11 +185,15 @@ def run_ga_clustering(X: np.ndarray, n_clusters: int) -> Tuple[List[Dict], List[
             'method': f'GA_{version_name}',
             'centroids': centroids,
             'fitness_history': ga.fitness_history,
-            'parameters': params,
+            'parameters': {
+                'population_size': params.population_size,
+                'n_generations': params.n_generations,
+                'mutation_rate': params.mutation_rate
+            },
             'metrics': {
                 'silhouette': silhouette_score(X, labels),
-                'db_index': davies_bouldin_score(X, labels),
-                'ch_score': calinski_harabasz_score(X, labels)
+                'Davies-Bouldin': davies_bouldin_score(X, labels),
+                'Calinski-Harabasz': calinski_harabasz_score(X, labels)
             }
         }
         
@@ -198,4 +201,3 @@ def run_ga_clustering(X: np.ndarray, n_clusters: int) -> Tuple[List[Dict], List[
         all_labels.append(labels)
     
     return all_results, all_labels
-

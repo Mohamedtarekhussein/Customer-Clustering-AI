@@ -2,66 +2,48 @@ import numpy as np
 from tqdm import tqdm
 from algorithms.ClusteringUtils import *
 from sklearn.metrics import silhouette_score, davies_bouldin_score, calinski_harabasz_score
+from dataclasses import dataclass
+from typing import Dict, List, Tuple
 
-def calculate_fitness(X, centroids):
+@dataclass
+class PSOParameters:
+    n_clusters: int
+    n_particles: int = 30
+    n_iterations: int = 100
+    w: float = 0.72  # inertia weight
+    c1: float = 1.49  # cognitive parameter
+    c2: float = 1.49  # social parameter
+    verbose: bool = True
+
+def calculate_fitness(X: np.ndarray, centroids: np.ndarray) -> float:
     """Calculate the sum of squared distances from each point to its nearest centroid"""
     distances = np.sqrt(((X[:, np.newaxis] - centroids)**2).sum(axis=2))
     return np.sum(np.min(distances, axis=1))
 
-def assign_clusters(X, centroids):
+def assign_clusters(X: np.ndarray, centroids: np.ndarray) -> np.ndarray:
     """Assign each data point to the nearest centroid"""
     distances = np.sqrt(((X[:, np.newaxis] - centroids)**2).sum(axis=2))
     return np.argmin(distances, axis=1)
 
-def pso_clustering(X, n_clusters, n_particles=30, n_iterations=100, w=0.72, c1=1.49, c2=1.49, verbose=True):
-    """
-    Perform clustering using Particle Swarm Optimization
-    
-    Parameters:
-    -----------
-    X : array-like, shape (n_samples, n_features)
-        The input data
-    n_clusters : int
-        Number of clusters to find
-    n_particles : int, optional (default=30)
-        Number of particles in the swarm
-    n_iterations : int, optional (default=100)
-        Number of iterations
-    w : float, optional (default=0.72)
-        Inertia weight
-    c1 : float, optional (default=1.49)
-        Cognitive parameter
-    c2 : float, optional (default=1.49)
-        Social parameter
-        
-    Returns:
-    --------
-    centroids : array, shape (n_clusters, n_features)
-        The final centroids
-    labels : array, shape (n_samples,)
-        The cluster labels for each point
-    """
-    # Data dimensions
+def pso_clustering_single(X: np.ndarray, params: PSOParameters) -> Tuple[np.ndarray, np.ndarray, List[float]]:
+    """Single run of PSO clustering with specific parameters"""
     n_samples, n_features = X.shape
     X_min = np.min(X, axis=0)
     X_max = np.max(X, axis=0)
     
-    # Initialize particles (each particle is a set of centroids)
+    # Initialize particles
     particles = []
     velocities = []
     personal_best_positions = []
     personal_best_scores = []
+    fitness_history = []
     
-    for _ in range(n_particles):
-        # Initialize position (centroids)
-        position = np.array([np.random.uniform(X_min, X_max) for _ in range(n_clusters)])
+    for _ in range(params.n_particles):
+        position = np.array([np.random.uniform(X_min, X_max) 
+                        for _ in range(params.n_clusters)])
         particles.append(position)
-        
-        # Initialize velocity
-        velocity = np.random.uniform(-0.1, 0.1, size=(n_clusters, n_features))
-        velocities.append(velocity)
-        
-        # Initialize personal best
+        velocities.append(np.random.uniform(-0.1, 0.1, 
+                                        size=(params.n_clusters, n_features)))
         personal_best_positions.append(position.copy())
         personal_best_scores.append(calculate_fitness(X, position))
     
@@ -71,83 +53,123 @@ def pso_clustering(X, n_clusters, n_particles=30, n_iterations=100, w=0.72, c1=1
     global_best_score = personal_best_scores[global_best_idx]
     
     # PSO loop
-    iterator = range(n_iterations)
-    if verbose:
+    iterator = range(params.n_iterations)
+    if params.verbose:
         iterator = tqdm(iterator, desc="PSO Progress")
     
     for _ in iterator:
-        for i in range(n_particles):
+        for i in range(params.n_particles):
             # Update velocity
-            r1, r2 = np.random.random(size=(n_clusters, n_features)), np.random.random(size=(n_clusters, n_features))
-            cognitive_component = c1 * r1 * (personal_best_positions[i] - particles[i])
-            social_component = c2 * r2 * (global_best_position - particles[i])
-            velocities[i] = w * velocities[i] + cognitive_component + social_component
+            r1 = np.random.random(size=(params.n_clusters, n_features))
+            r2 = np.random.random(size=(params.n_clusters, n_features))
+            cognitive = params.c1 * r1 * (personal_best_positions[i] - particles[i])
+            social = params.c2 * r2 * (global_best_position - particles[i])
+            velocities[i] = params.w * velocities[i] + cognitive + social
             
             # Update position
             particles[i] += velocities[i]
-            
-            # Ensure within bounds
             particles[i] = np.clip(particles[i], X_min, X_max)
             
-            # Evaluate fitness
+            # Update personal and global best
             fitness = calculate_fitness(X, particles[i])
-            
-            # Update personal best
             if fitness < personal_best_scores[i]:
                 personal_best_scores[i] = fitness
                 personal_best_positions[i] = particles[i].copy()
-                
-                # Update global best
                 if fitness < global_best_score:
                     global_best_score = fitness
                     global_best_position = particles[i].copy()
-    
-    # Final assignment
-    final_labels = assign_clusters(X, global_best_position)
-    
-    return global_best_position, final_labels
-
-def run_pso_clustering(X, n_clusters, scaler=None, feature_names=None):
-    """
-    Run PSO clustering and return results
-    
-    Parameters:
-    -----------
-    X : array-like, shape (n_samples, n_features)
-        The input data
-    n_clusters : int
-        Number of clusters to find
-    scaler : object, optional
-        Scaler used to transform the data
-    feature_names : list, optional
-        Names of the features
         
-    Returns:
-    --------
-    results : dict
-        Dictionary containing clustering results and metrics
-    labels : array, shape (n_samples,)
-        Cluster labels for each point
-    """
-    print("\nRunning Particle Swarm Optimization (PSO) for clustering...")
-    pso_centroids, pso_labels = pso_clustering(X, n_clusters)
+        fitness_history.append(global_best_score)
     
-    # Ensure labels are 1D array
-    pso_labels = np.ravel(pso_labels)
+    final_labels = assign_clusters(X, global_best_position)
+    return global_best_position, final_labels, fitness_history
+
+def run_pso_clustering(X: np.ndarray, n_clusters: int) -> Tuple[List[Dict], List[np.ndarray]]:
+    """Run PSO clustering with 4 different parameter settings"""
     
-    # Evaluate clustering performance
-    results = {
-        'method': 'PSO',
-        'centroids': pso_centroids,
-        'metrics': {
-            'silhouette': silhouette_score(X, pso_labels),
-            'db_index': davies_bouldin_score(X, pso_labels),
-            'ch_score': calinski_harabasz_score(X, pso_labels)
-        }
+    parameter_versions = {
+        'quick': PSOParameters(
+            n_clusters=n_clusters,
+            n_particles=20,
+            n_iterations=50,
+            w=0.8,
+            c1=1.5,
+            c2=1.5,
+            verbose=False
+        ),
+        'balanced': PSOParameters(
+            n_clusters=n_clusters,
+            n_particles=30,
+            n_iterations=100,
+            w=0.72,
+            c1=1.49,
+            c2=1.49,
+            verbose=False
+        ),
+        'thorough': PSOParameters(
+            n_clusters=n_clusters,
+            n_particles=50,
+            n_iterations=200,
+            w=0.6,
+            c1=2.0,
+            c2=2.0,
+            verbose=False
+        ),
+        'exploratory': PSOParameters(
+            n_clusters=n_clusters,
+            n_particles=40,
+            n_iterations=150,
+            w=0.9,
+            c1=1.2,
+            c2=1.8,
+            verbose=False
+        )
     }
     
-    # Visualize clusters
-    visualize_clusters(X, pso_labels, pso_centroids, "Particle Swarm Optimization", scaler, feature_names)
+    all_results = []
+    all_labels = []
     
-    return results, pso_labels
-
+    for version_name, params in parameter_versions.items():
+        try:
+            centroids, labels, fitness_history = pso_clustering_single(X, params)
+            
+            # Calculate metrics only if we have at least 2 clusters
+            unique_clusters = len(np.unique(labels))
+            metrics = {}
+            
+            if unique_clusters > 1:
+                metrics = {
+                    'silhouette': silhouette_score(X, labels),
+                    'Davies-Bouldin': davies_bouldin_score(X, labels),
+                    'Calinski-Harabasz': calinski_harabasz_score(X, labels)
+                }
+            else:
+                metrics = {
+                    'silhouette': None,
+                    'Davies-Bouldin': None,
+                    'Calinski-Harabasz': None
+                }
+            
+            results = {
+                'method': f'PSO_{version_name}',
+                'parameters': {
+                    'n_particles': params.n_particles,
+                    'n_iterations': params.n_iterations,
+                    'w': params.w,
+                    'c1': params.c1,
+                    'c2': params.c2
+                },
+                'centroids': centroids,
+                'metrics': metrics,
+                'fitness_history': fitness_history,
+                'n_clusters': unique_clusters
+            }
+            
+            all_results.append(results)
+            all_labels.append(labels)
+            
+        except Exception as e:
+            print(f"Error running PSO {version_name}: {str(e)}")
+            continue
+    
+    return all_results, all_labels

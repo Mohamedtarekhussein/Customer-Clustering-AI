@@ -1,4 +1,3 @@
-#changed
 from sklearn.cluster import DBSCAN
 from sklearn.metrics import silhouette_score, davies_bouldin_score, calinski_harabasz_score
 import numpy as np
@@ -32,16 +31,25 @@ def run_dbscan_single(X: np.ndarray, params: DBSCANParameters) -> Dict:
     if len(set(labels[mask])) > 1:
         metrics = {
             'silhouette': silhouette_score(X[mask], labels[mask]),
-            'davies_bouldin': davies_bouldin_score(X[mask], labels[mask]),
-            'calinski_harabasz': calinski_harabasz_score(X[mask], labels[mask])
+            'Davies-Bouldin': davies_bouldin_score(X[mask], labels[mask]),
+            'Calinski-Harabasz': calinski_harabasz_score(X[mask], labels[mask])
         }
     else:
-        metrics = {'error': 'DBSCAN found only one cluster or noise.'}
+        metrics = {
+            'silhouette': None,
+            'Davies-Bouldin': None,
+            'Calinski-Harabasz': None
+        }
     
     return {
+        'method': f"DBSCAN (eps={params.eps}, min_samples={params.min_samples})",
         'labels': labels,
         'n_clusters': n_clusters,
-        'metrics': metrics
+        'metrics': metrics,
+        'parameters': {
+            'eps': params.eps,
+            'min_samples': params.min_samples
+        }
     }
 
 def run_dbscan_clustering(X: np.ndarray) -> Tuple[List[Dict], List[np.ndarray]]:
@@ -80,15 +88,7 @@ def run_dbscan_clustering(X: np.ndarray) -> Tuple[List[Dict], List[np.ndarray]]:
     
     for version_name, params in parameter_versions.items():
         result = run_dbscan_single(X, params)
-        
-        results = {
-            'method': f'DBSCAN_{version_name}',
-            'parameters': params,
-            'n_clusters': result['n_clusters'],
-            'metrics': result['metrics']
-        }
-        
-        all_results.append(results)
+        all_results.append(result)
         all_labels.append(result['labels'])
     
     return all_results, all_labels
